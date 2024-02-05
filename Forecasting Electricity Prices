@@ -1,0 +1,240 @@
+clc
+clear
+G = readtable('Data_Germany')
+
+%scatter plots for all data
+price = table2array(G(1:17544,"Price"));
+load = table2array(G(1:17544,"Load"));
+time = table2array(G(1:17544,"Time"));
+plot(load,price,'.')
+set(gca,'fontsize',5,'linewidth',1)
+xlabel('Load'),ylabel('Price')
+title('Load vs Price for all Data')
+
+% % scatter plot for all hours on saturdays
+x= G.Date(1:17544);
+p= G.Price(1:17544);
+l= G.Load(1:17544);
+t = G.Time(1:17544);
+PriceSaturday = p(find(weekday(x) == 7));
+LoadSaturday = l(find(weekday(x) == 7));
+plot(LoadSaturday,PriceSaturday,'.')
+set(gca,'fontsize',5,'linewidth',1)
+xlabel('SaturdayLoad'),ylabel('SaturdayPrice')
+title('Load vs Prices for all Saturdays')
+
+%%scatter plot for hour 10a.m all days of the week
+for_price_10am = p(find(t == "10:00:00"));
+for_load_10am = l(find(t == "10:00:00"));
+plot(for_load_10am,for_price_10am, '.')
+set(gca,'fontsize',5,'linewidth',1)
+xlabel('Price10am');
+ylabel('Load10am');
+title('Load vs Prices for all 10am')
+
+
+%seasonal hourly Load plots 2019-2020
+myDatetime = table2timetable(G,'RowTimes', datetime(G.Date + G.Time,'Format','MM/dd/yyyy HH:mm:ss'));
+Ger_day_Load = reshape(l,24,[]);
+plot((t(1:24)),Ger_day_Load')
+xlabel('Time of day')
+ylabel('Load')
+title('Hourly Electricity Load: Germany')
+
+% seasonal weekly Load plots 2019-2020
+tt =myDatetime.Time_1(1:17544);
+Ger_elec_load_ext = [l; NaN*ones(24*4,1)];
+Ger_week_demand = reshape(Ger_elec_load_ext,24*7,[]);
+plot(tt(1:24*7),Ger_week_demand')
+datetick('x','ddd')
+xlabel('Weekday')
+ylabel('Load')
+title('Weekly Electricity Load: Germany')
+%Seasonal hourly price plots 2019-2020
+Ger_day_Price = reshape(p,24,[]);
+plot((t(1:24)),Ger_day_Price')
+xlabel('Time of day')
+ylabel('Price')
+title('Hourly Electricity Price: Germany')
+
+%Seasonal weekly price plots 2019-2020
+Ger_elec_price_ext = [p; NaN*ones(24*4,1)];
+Ger_week_price = reshape(Ger_elec_price_ext,24*7,[]);
+plot(tt(1:24*7),Ger_week_price')
+datetick('x','ddd')
+xlabel('Weekday')
+ylabel('Price')
+title('Weekly Electricity Price: Germany')
+
+%Naive Plots
+%Naive 1 
+%for all days in 2021
+d1= G(17545:end,:);
+p5 = G(17545-168:end-168,"Price");
+MAE1 = mean(abs(table2array(p5)- table2array(d1(:,"Price"))))
+RMSE =(mean(table2array(p5)- table2array(d1(:,"Price")).^2)).^0.5
+% for all hours in 2021
+t = 1:24;
+nvt = d1(t:24:end,"Price");
+p5time = p5(t:24:end,"Price");
+MAE2 = mean(abs(table2array(nvt)- table2array(p5time))) 
+RMSE2 = (mean(table2array(nvt) - table2array(p5time).^2)).^0.5
+
+%Naive 2
+p = table2array(G(1:end,4));
+dow = table2array(d1(1:end,5));
+pf = zeros(size(p))
+a= 0;
+for j=1:7152
+p = table2array(G(1:end,4));
+dow = table2array(d1(1:end,5));
+    switch dow(j)
+        case {3,4,5, 6}
+            pf= p(17545+a-24);
+        otherwise
+            pf= p(17545+a-168);
+    end
+    a=a+1;
+    p1(a,1) = pf;
+end
+MAE3= mean(abs(p1- table2array(d1(:,"Price"))))
+RMSE3 = (mean(p1- table2array(d1(:,"Price")).^2)).^0.5
+figure
+plot(p,'x','markersize',8)
+hold on
+plot(pf,'r.-','markersize',12)
+hold off
+legend ('Price','Naive forecast')
+
+%Naive 2 for all hours in 2021
+hour = 1:24;
+nvt2 = p1(hour:24:end);
+p5time2 = table2array(p5(hour:end:24, "Price"));
+MAE4 = mean(abs(nvt2 - p5time2))
+RMSE4=(mean((nvt2 - p5time2 ).^2)).^0.5
+
+%Going back 1 day before we compute the minimun value
+%and use it for all hours of the next day
+%Minimum value computation
+h= 24;
+t = 1;
+for i =1:24:length(G.Price(1:end-24))
+    n(t) = min(G.Price(i:h));
+    h = h+24;
+    for x = i:h
+        MnM(x) = n(t);
+    end
+    t = t+1;
+end
+MnM = MnM';
+% For further computation using the minimum value set above we go back
+%to obtain 24 values for computation and store them in a variable
+for i = 1:24:length(G.Price(1:end))
+    n(t)= G.Price(i+23);
+    for q = i:h
+        Val(q) = n(t);
+    end
+        t= t+1;
+        h= h+24;
+end
+Val = Val';
+
+% ARX1 we forecast for each hour in all the days in 2021
+%From 2019-2020 a 2 year calibration window
+%Time window for the forecast
+T = 731;
+pf2 = zeros(size(G(:,4)));
+for hour = 1:24
+    Prc = table2array(G(hour:24:end, "Price"));%24 hourly Price
+    Ld = table2array(G(hour:24:end, "Load"))%24 hourly load
+    MinP = MnM(hour:24:end);% Minimum price per day
+    Pric24 = Val(hour:24:end);% Price per day for 24 hours
+    DoW = table2array(G(hour:24:end, "weekday"));
+    Mon = DoW == 2;
+    Sat = DoW == 7;
+    Sun = DoW == 1;
+    %Price and Load set within our time window Forecast, T = 731
+    For_Prc = Prc(1:T);
+    For_Ld = Ld(1:T);
+    For_MinP = MinP(1:T);
+    For_Pric24 = Pric24(1:T);
+    For_Mon = Mon(1:T);
+    For_Sat = Sat(1:T);
+    For_Sun = Sun(1:T);
+    %Estimated model y for day =d ,d-1, load and 24 min is considered as
+    ar_Y= For_Prc(8:end);
+    if hour<= 23
+        ar_X = [ones(T-7,1) For_Prc(7:end-1) For_Prc(1:end-7) For_Ld(8:end) For_MinP(7:end-1) For_Pric24(7:end-1) For_Sat(8:end) For_Sun(8:end) For_Mon(8:end) ];
+        ar_X_For = [ones(length(Prc)-T,1) Prc(T:end-1) Prc(T-6:end-7) For_Ld(T+1:end) For_MinP(T:end-1) For_Pric24(T:end-1) For_Sat(T+1:end) For_Sun(T+1:end) For_Mon(T+1:end)];
+    else
+        ar_X = [ones(T-7,1) For_Prc(7:end-1) For_Prc(1:end-7) For_Ld(8:end) For_MinP(7:end-1) For_Sat(8:end) For_Sun(8:end) For_Mon(8:end) ];
+        ar_X_For = [ones(length(Prc)-T,1) Prc(T:end-1) Prc(T-6:end-7) For_Ld(T+1:end) For_MinP(T:end-1) For_Sat(T+1:end) For_Sun(T+1:end) For_Mon(T+1:end)];
+    end
+    %Regression analysis to estimate y using beta
+    beta = regress(ar_Y,ar_X);
+    Pf3 =zeros(size(For_Prc));
+    Pf3(T+1:end,1) =  ar_X_For.*beta;
+    pf2(hour:24:end) = Pf3;
+    disp([hour, mean(abs(Prc(T+1:end) - Pf3(T+1:end))) (mean((PrcT+1:end)-Pf3(T+1:end)).^2).^0.5])
+end
+disp([(mean(abs(table2array(G(T*24+1:end,4)) - pf2(T*24+1:end,4)))) (mean((table2array(G(T*24+1:end,4))- pf2(T*24+1:end)).^2)).^0.5])
+
+%ARX2 using rolling callibration 2.01.2019-1.01.2021,
+clb = [];
+cc= 0;
+dd=0;;
+T= 731;
+pf4 = zeros(size(G(:,2)));
+Gmn = [G array2table(MnM) array2table(Val)];
+for jj= 1:298
+    roll =G(1+dd:17544+dd,:);
+    for hour = 1:24
+        Prc = table2array(roll(hour:24:end, "Price"));%24 hourly Price
+        Ld = table2array(roll(hour:24:end, "Load"))%24 hourly load
+        MinP = table2array(roll(hour:24:end));% Minimum price per day
+        Pric24 = table2array(roll(hour:24:end));% Price per day for 24 hours
+        DoW = table2array(roll(hour:24:end, "weekday"));
+        DMon = DoW == 2;
+        DSat = DoW == 7;
+        DSun = DoW == 1;
+        DoW2 = table2array(G(hour:24:end, "weekday"));
+        DmMon = DoW2 == 2;
+        DmSat = DoW2 == 7;
+        DmSun = DoW2 == 1;
+        Ld2 = table2array(G(hour:24:end, "Load"))%24 hourly load
+
+        %Price estimation rolling callibration, T = 731
+        For_Prc_roll = Prc(1:T);
+        For_Ld_roll = Ld(1:T);
+        For_MinP_roll = MinP(1:T);
+        For_Pric24_roll = Pric24(1:T);
+        For_Mon_roll = Mon(1:T);
+        For_Sat_roll = Sat(1:T);
+        For_Sun_roll = Sun(1:T);
+        %Estimated model y for day =d ,d-1, load and 24 min is considered as
+        ar_Y2= For_Prc_roll(8:end);
+        if hour<= 23
+            ar_X2 = [ones(T-7,1) For_Prc_roll(7:end-1) For_Prc_roll(1:end-7) For_Ld_roll(8:end) For_MinP_roll(7:end-1) For_Pric24_roll(7:end-1) For_Sat_roll(8:end) For_Sun(8:end) For_Mon(8:end) ];
+            ar_X_For2 = [1 Prc(T) Prc(T-6) Ld2(T+1+cc) For_MinP(T) For_Pric24(T) DmSat(T+1+dd) DmSun(T+1+dd) DmMon(T+1+dd)];
+        else
+            ar_X2 = [ones(T-7,1) For_Prc_roll(7:end-1) For_Prc_roll(1:end-7) For_Ld_roll(8:end) For_MinP_roll(7:end-1) For_Sat_roll(8:end) For_Sun_roll(8:end) For_Mon_roll(8:end) ];
+            ar_X_For2 = [1 Prc(T) Prc(T-6) Ld2(T+1+cc) For_MinP(T) DmSat(T+1+dd) DmSun(T+1+dd) DmMon(T+1+dd)];
+        end
+        %Regression analysis to estimate y using beta
+        beta1 = regress(ar_Y2,ar_X2);
+        Pf_3=  ar_X_For2.*beta1;
+        clb = [clb pf_3]
+    end
+    cc = cc+24;
+    dd = dd+1
+end
+disp([(mean(abs(table2array(G(T*24+1:end,4)) - pf2(T*24+1:end,4)))) (mean((table2array(G(T*24+1:end,4))- pf2(T*24+1:end)).^2)).^0.5])
+
+
+
+
+
+
+
+
+
